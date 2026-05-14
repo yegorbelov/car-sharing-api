@@ -1,0 +1,33 @@
+# OS
+.DS_Store
+
+# IDE
+.vscode
+.idea
+
+# Local / live reload
+tmp
+
+# Go build & test artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/bin/
+/dist/
+
+# Coverage & profiling
+*.coverprofile
+coverage.out
+coverage.html
+*.prof
+cpu.prof
+mem.prof
+
+# Secrets (keep .env.example tracked)
+.env
+.env.*
+!.env.example
