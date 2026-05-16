@@ -138,4 +138,7 @@ func registerAPIRoutes(e *echo.Echo, pool *pgxpool.Pool) {
 	g.GET("/health", h.getHealth)
 	g.GET("/vehicles", h.getVehicles)
 	g.GET("/bookings", h.getBookings)
+	g.POST("/auth/register", h.postRegister)
+	g.POST("/auth/login", h.postLogin)
+	g.GET("/auth/me", h.getMe)
 }

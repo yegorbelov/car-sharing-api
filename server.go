@@ -45,8 +45,17 @@ func main() {
 		)
 	}
 
+	if err := ensureSchema(ctx, pool); err != nil {
+		log.Fatalf("schema: %v", err)
+	}
+
 	e := echo.New()
 	e.Use(middleware.RequestLogger())
+	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+		AllowOrigins: []string{"*"},
+		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions},
+		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
+	}))
 
 	e.GET("/", func(c *echo.Context) error {
 		return c.String(http.StatusOK, "Hello, World!")

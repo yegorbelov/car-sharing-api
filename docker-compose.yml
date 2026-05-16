@@ -11,7 +11,7 @@ services:
       - '5433:5432'
     volumes:
       - carsharing_pgdata:/var/lib/postgresql/data
-      - ./car-sharing-api/migrations/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./migrations/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
 
 volumes:
   carsharing_pgdata:
