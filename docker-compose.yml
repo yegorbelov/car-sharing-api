@@ -1,0 +1,17 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: car-sharing-postgres
+    environment:
+      POSTGRES_USER: carsharing
+      POSTGRES_PASSWORD: carsharing
+      POSTGRES_DB: carsharing
+    # Host 5433 avoids clashing with a local Postgres on 5432 (common cause of SASL auth failures).
+    ports:
+      - '5433:5432'
+    volumes:
+      - carsharing_pgdata:/var/lib/postgresql/data
+      - ./car-sharing-api/migrations/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+
+volumes:
+  carsharing_pgdata:
