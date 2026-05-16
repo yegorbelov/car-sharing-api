@@ -218,7 +218,35 @@ func (a *api) getMe(c *echo.Context) error {
 		SELECT id, email, full_name FROM app_users WHERE id = $1
 	`, uid).Scan(&u.ID, &u.Email, &u.FullName)
 	if err != nil {
-		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server_error"})
 	}
 	return c.JSON(http.StatusOK, map[string]userPublic{"user": u})
+}
+
+const echoUserIDKey = "authUserID"
+
+func (a *api) requireAuth(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		uid, err := bearerUserID(c)
+		if err != nil {
+			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		}
+		// Verify the user still exists in the DB (protects against DB resets / deleted accounts).
+		var exists bool
+		if err := a.db.QueryRow(c.Request().Context(),
+			`SELECT EXISTS(SELECT 1 FROM app_users WHERE id = $1)`, uid,
+		).Scan(&exists); err != nil || !exists {
+			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "session_invalid"})
+		}
+		c.Set(echoUserIDKey, uid)
+		return next(c)
+	}
+}
+
+func authUserID(c *echo.Context) int64 {
+	v, _ := c.Get(echoUserIDKey).(int64)
+	return v
 }
