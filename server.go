@@ -48,6 +48,7 @@ func main() {
 	if err := ensureSchema(ctx, pool); err != nil {
 		log.Fatalf("schema: %v", err)
 	}
+	ensureUploadDir()
 
 	e := echo.New()
 	e.Use(middleware.RequestLogger())
@@ -57,9 +58,7 @@ func main() {
 		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
 	}))
 
-	e.GET("/", func(c *echo.Context) error {
-		return c.String(http.StatusOK, "Hello, World!")
-	})
+	e.Static("/uploads", "./uploads")
 
 	registerAPIRoutes(e, pool)
 

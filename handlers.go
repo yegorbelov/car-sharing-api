@@ -27,6 +27,7 @@ type vehicleRow struct {
 	PricePerDay      float64 `json:"pricePerDay"`
 	Rating           float64 `json:"rating"`
 	OwnerUserID      *int64  `json:"ownerUserId,omitempty"`
+	PhotoURL         string  `json:"photoUrl,omitempty"`
 }
 
 type createVehicleRequest struct {
@@ -46,7 +47,7 @@ func scanVehicle(v *vehicleRow, owner *sql.NullInt64, row interface {
 func (a *api) getVehicles(c *echo.Context) error {
 	ctx := c.Request().Context()
 	rows, err := a.db.Query(ctx, `
-		SELECT id, title, city, class, price_per_day_cents, rating, owner_user_id
+		SELECT id, title, city, class, price_per_day_cents, rating, owner_user_id, photo_url
 		FROM vehicles ORDER BY id
 	`)
 	if err != nil {
@@ -58,7 +59,7 @@ func (a *api) getVehicles(c *echo.Context) error {
 	for rows.Next() {
 		var v vehicleRow
 		var owner sql.NullInt64
-		if err := rows.Scan(&v.ID, &v.Title, &v.City, &v.Class, &v.PricePerDayCents, &v.Rating, &owner); err != nil {
+		if err := rows.Scan(&v.ID, &v.Title, &v.City, &v.Class, &v.PricePerDayCents, &v.Rating, &owner, &v.PhotoURL); err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		}
 		v.PricePerDay = float64(v.PricePerDayCents) / 100
@@ -86,9 +87,9 @@ func (a *api) getVehicle(c *echo.Context) error {
 	var v vehicleRow
 	var owner sql.NullInt64
 	err = a.db.QueryRow(ctx, `
-		SELECT id, title, city, class, price_per_day_cents, rating, owner_user_id
+		SELECT id, title, city, class, price_per_day_cents, rating, owner_user_id, photo_url
 		FROM vehicles WHERE id = $1
-	`, id).Scan(&v.ID, &v.Title, &v.City, &v.Class, &v.PricePerDayCents, &v.Rating, &owner)
+	`, id).Scan(&v.ID, &v.Title, &v.City, &v.Class, &v.PricePerDayCents, &v.Rating, &owner, &v.PhotoURL)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "not_found"})
@@ -136,8 +137,8 @@ func (a *api) postVehicle(c *echo.Context) error {
 	err := a.db.QueryRow(ctx, `
 		INSERT INTO vehicles (title, city, class, price_per_day_cents, rating, owner_user_id)
 		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id, title, city, class, price_per_day_cents, rating, owner_user_id
-	`, title, city, class, cents, rating, uid).Scan(&v.ID, &v.Title, &v.City, &v.Class, &v.PricePerDayCents, &v.Rating, &owner)
+		RETURNING id, title, city, class, price_per_day_cents, rating, owner_user_id, photo_url
+	`, title, city, class, cents, rating, uid).Scan(&v.ID, &v.Title, &v.City, &v.Class, &v.PricePerDayCents, &v.Rating, &owner, &v.PhotoURL)
 	if err != nil {
 		var pe *pgconn.PgError
 		if errors.As(err, &pe) && pe.Code == "23503" {
@@ -165,5 +166,7 @@ func registerAPIRoutes(e *echo.Echo, pool *pgxpool.Pool) {
 
 	secured := g.Group("", h.requireAuth)
 	secured.POST("/vehicles", h.postVehicle)
+	secured.POST("/auth/avatar", h.postAvatar)
+	secured.POST("/vehicles/:id/photo", h.postVehiclePhoto)
 	registerDealRoutes(secured, h)
 }

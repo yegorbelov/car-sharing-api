@@ -18,6 +18,7 @@ tmp
 *.out
 /bin/
 /dist/
+uploads
 
 # Coverage & profiling
 *.coverprofile
