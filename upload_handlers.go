@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -69,7 +70,7 @@ func (a *api) postAvatar(c *echo.Context) error {
 		`SELECT avatar_url FROM app_users WHERE id = $1`, uid,
 	).Scan(&old)
 	if old != "" {
-		_ = os.Remove(filepath.Join(uploadDir, old))
+		_ = os.Remove(filepath.Join(uploadDir, strings.TrimPrefix(old, "/uploads/")))
 	}
 
 	url := "/uploads/" + name
@@ -82,7 +83,7 @@ func (a *api) postAvatar(c *echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{"avatarUrl": url})
 }
 
-// POST /api/v1/vehicles/:id/photo  — upload or replace a vehicle's cover photo (owner only).
+// POST /api/v1/vehicles/:id/photo  — append a photo (owner only, max 10 per vehicle).
 func (a *api) postVehiclePhoto(c *echo.Context) error {
 	uid := authUserID(c)
 	vid, err := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -92,12 +93,12 @@ func (a *api) postVehiclePhoto(c *echo.Context) error {
 
 	ctx := c.Request().Context()
 	var ownerID sql.NullInt64
-	var oldPhoto string
+	var legacyPhoto, photoURLsJSON string
 	err = a.db.QueryRow(ctx,
-		`SELECT owner_user_id, photo_url FROM vehicles WHERE id = $1`, vid,
-	).Scan(&ownerID, &oldPhoto)
+		`SELECT owner_user_id, photo_url, COALESCE(photo_urls, '[]') FROM vehicles WHERE id = $1`, vid,
+	).Scan(&ownerID, &legacyPhoto, &photoURLsJSON)
 	if err != nil {
-		if pgx.ErrNoRows == err {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "not_found"})
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -106,19 +107,30 @@ func (a *api) postVehiclePhoto(c *echo.Context) error {
 		return c.JSON(http.StatusForbidden, map[string]string{"error": "forbidden"})
 	}
 
+	urls := effectiveVehiclePhotoList(photoURLsJSON, legacyPhoto)
+	if len(urls) >= maxVehiclePhotos {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "too_many_photos"})
+	}
+
 	name, err := saveUpload(c, "photo")
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 
-	if oldPhoto != "" {
-		_ = os.Remove(filepath.Join(uploadDir, strings.TrimPrefix(oldPhoto, "/uploads/")))
-	}
-
-	url := "/uploads/" + name
-	_, err = a.db.Exec(ctx, `UPDATE vehicles SET photo_url = $1 WHERE id = $2`, url, vid)
+	newURL := "/uploads/" + name
+	urls = append(urls, newURL)
+	jsonStr, err := marshalVehiclePhotoURLs(urls)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
-	return c.JSON(http.StatusOK, map[string]string{"photoUrl": url})
+
+	cover := primaryVehiclePhoto(urls)
+	_, err = a.db.Exec(ctx, `UPDATE vehicles SET photo_urls = $1, photo_url = $2 WHERE id = $3`, jsonStr, cover, vid)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]any{
+		"photoUrl":  cover,
+		"photoUrls": urls,
+	})
 }
