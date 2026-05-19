@@ -6,9 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -59,17 +57,6 @@ type dealSummary struct {
 	StartDate       string `json:"startDate"`
 	EndDate         string `json:"endDate"`
 	CreatedAt       string `json:"createdAt"`
-}
-
-type dealMessageRow struct {
-	ID        int64  `json:"id"`
-	SenderID  int64  `json:"senderId"`
-	Body      string `json:"body"`
-	CreatedAt string `json:"createdAt"`
-}
-
-type postMessageRequest struct {
-	Body string `json:"body"`
 }
 
 type ledgerRow struct {
@@ -273,89 +260,6 @@ func (a *api) getDeal(c *echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 	return c.JSON(http.StatusOK, d)
-}
-
-func (a *api) getDealMessages(c *echo.Context) error {
-	uid := authUserID(c)
-	dealID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || dealID <= 0 {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid_id"})
-	}
-	ctx := c.Request().Context()
-	var allowed bool
-	err = a.db.QueryRow(ctx, `
-		SELECT EXISTS(
-			SELECT 1 FROM rental_deals WHERE id = $1 AND (renter_id = $2 OR owner_id = $2)
-		)
-	`, dealID, uid).Scan(&allowed)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
-	}
-	if !allowed {
-		return c.JSON(http.StatusNotFound, map[string]string{"error": "not_found"})
-	}
-
-	rows, err := a.db.Query(ctx, `
-		SELECT id, sender_id, body, created_at::text
-		FROM deal_messages WHERE deal_id = $1 ORDER BY created_at ASC, id ASC
-	`, dealID)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
-	}
-	defer rows.Close()
-
-	var list []dealMessageRow
-	for rows.Next() {
-		var m dealMessageRow
-		if err := rows.Scan(&m.ID, &m.SenderID, &m.Body, &m.CreatedAt); err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		}
-		list = append(list, m)
-	}
-	if err := rows.Err(); err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
-	}
-	if list == nil {
-		list = []dealMessageRow{}
-	}
-	return c.JSON(http.StatusOK, list)
-}
-
-func (a *api) postDealMessage(c *echo.Context) error {
-	uid := authUserID(c)
-	dealID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || dealID <= 0 {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid_id"})
-	}
-	var req postMessageRequest
-	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid_json"})
-	}
-	body := strings.TrimSpace(req.Body)
-	if body == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "empty_body"})
-	}
-	if utf8.RuneCountInString(body) > 2000 {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "body_too_long"})
-	}
-
-	ctx := c.Request().Context()
-	var inserted dealMessageRow
-	err = a.db.QueryRow(ctx, `
-		INSERT INTO deal_messages (deal_id, sender_id, body)
-		SELECT $1, $2, $3
-		WHERE EXISTS (
-			SELECT 1 FROM rental_deals d WHERE d.id = $1 AND (d.renter_id = $2 OR d.owner_id = $2)
-		)
-		RETURNING id, sender_id, body, created_at::text
-	`, dealID, uid, body).Scan(&inserted.ID, &inserted.SenderID, &inserted.Body, &inserted.CreatedAt)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return c.JSON(http.StatusNotFound, map[string]string{"error": "not_found"})
-		}
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
-	}
-	return c.JSON(http.StatusCreated, inserted)
 }
 
 func (a *api) postAcceptDeal(c *echo.Context) error {

@@ -39,6 +39,13 @@ type demoVehicleSpec struct {
 	vin                string
 }
 
+// demoVehicleGallery — stable public URLs so the app can swipe a multi-photo gallery.
+var demoVehicleGallery = []string{
+	"https://images.unsplash.com/photo-1494976388531-d1058494cdd8?auto=format&fit=crop&w=800&q=80",
+	"https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=800&q=80",
+	"https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&w=800&q=80",
+}
+
 func hasLegacyInitVehicles(ctx context.Context, pool *pgxpool.Pool) (bool, error) {
 	var n int
 	err := pool.QueryRow(ctx, `
@@ -56,7 +63,10 @@ func ensureDevSeed(ctx context.Context, pool *pgxpool.Pool) error {
 		return err
 	}
 	if markerExists {
-		return repairOrphanVehicles(ctx, pool)
+		if err := repairOrphanVehicles(ctx, pool); err != nil {
+			return err
+		}
+		return backfillDemoVehicleGalleries(ctx, pool)
 	}
 
 	legacy, err := hasLegacyInitVehicles(ctx, pool)
@@ -99,6 +109,21 @@ func repairOrphanVehicles(ctx context.Context, pool *pgxpool.Pool) error {
 		SET owner_user_id = $1
 		WHERE owner_user_id IS NULL
 	`, ownerID)
+	return err
+}
+
+func backfillDemoVehicleGalleries(ctx context.Context, pool *pgxpool.Pool) error {
+	jsonStr, err := marshalVehiclePhotoURLs(demoVehicleGallery)
+	if err != nil {
+		return err
+	}
+	cover := primaryVehiclePhoto(demoVehicleGallery)
+	_, err = pool.Exec(ctx, `
+		UPDATE vehicles
+		SET photo_url = $1, photo_urls = $2
+		WHERE COALESCE(trim(photo_url), '') = ''
+		  AND (photo_urls IS NULL OR trim(photo_urls) = '' OR photo_urls = '[]')
+	`, cover, jsonStr)
 	return err
 }
 
@@ -210,6 +235,12 @@ func insertFullDemoData(ctx context.Context, pool *pgxpool.Pool) error {
 		userIDs[u.email] = id
 	}
 
+	galleryJSON, err := marshalVehiclePhotoURLs(demoVehicleGallery)
+	if err != nil {
+		return err
+	}
+	galleryCover := primaryVehiclePhoto(demoVehicleGallery)
+
 	vehicleIDs := make(map[string]int32, len(vehicles))
 	for _, v := range vehicles {
 		ownerID := userIDs[v.ownerEmail]
@@ -217,11 +248,13 @@ func insertFullDemoData(ctx context.Context, pool *pgxpool.Pool) error {
 		err := tx.QueryRow(ctx, `
 			INSERT INTO vehicles (
 				title, city, class, price_per_day_cents, rating, owner_user_id,
+				photo_url, photo_urls,
 				mileage_km, model_year, transmission, fuel_type, drivetrain,
 				engine_cc, exterior_color, condition_summary, tech_notes, vin
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
 			RETURNING id
 		`, v.title, v.city, v.class, v.priceCents, v.rating, ownerID,
+			galleryCover, galleryJSON,
 			v.mileageKm, v.modelYear, v.transmission, v.fuelType, v.drivetrain,
 			v.engineCC, v.exteriorColor, v.conditionSummary, v.techNotes, v.vin,
 		).Scan(&id)

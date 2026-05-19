@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -53,6 +54,63 @@ func saveUpload(c *echo.Context, field string) (filename string, err error) {
 		return "", fmt.Errorf("save_failed")
 	}
 	return uniqueName, nil
+}
+
+// saveMessageAttachment stores a chat image or document; returns public URL path, type, and original name.
+func saveMessageAttachment(c *echo.Context, field string) (publicURL, attType, originalName string, err error) {
+	candidates := []string{field, "attachment", "photo"}
+	var (
+		file   multipart.File
+		header *multipart.FileHeader
+	)
+	seen := make(map[string]struct{}, len(candidates))
+	for _, name := range candidates {
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		f, h, ferr := c.Request().FormFile(name)
+		if ferr == nil {
+			file, header = f, h
+			break
+		}
+	}
+	if file == nil || header == nil {
+		return "", "", "", fmt.Errorf("missing_file")
+	}
+	defer file.Close()
+
+	if header.Size > maxUploadSize {
+		return "", "", "", fmt.Errorf("file_too_large")
+	}
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	attType = "file"
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".webp", ".heic":
+		attType = "image"
+	case ".pdf", ".doc", ".docx", ".txt", ".zip", ".xls", ".xlsx":
+	default:
+		return "", "", "", fmt.Errorf("invalid_file_type")
+	}
+
+	uniqueName := fmt.Sprintf("%d_%d%s", time.Now().UnixNano(), header.Size, ext)
+	dst := filepath.Join(uploadDir, uniqueName)
+	f, err := os.Create(dst)
+	if err != nil {
+		return "", "", "", fmt.Errorf("save_failed")
+	}
+	defer f.Close()
+	if _, err = io.Copy(f, file); err != nil {
+		return "", "", "", fmt.Errorf("save_failed")
+	}
+	name := strings.TrimSpace(header.Filename)
+	if name == "" {
+		name = uniqueName
+	}
+	return "/uploads/" + uniqueName, attType, name, nil
 }
 
 // POST /api/v1/auth/avatar  — upload or replace the authenticated user's avatar.

@@ -64,6 +64,11 @@ CREATE TABLE IF NOT EXISTS deal_messages (
 );
 CREATE INDEX IF NOT EXISTS deal_messages_deal_idx ON deal_messages (deal_id, created_at);
 
+ALTER TABLE deal_messages ADD COLUMN IF NOT EXISTS attachment_url TEXT NOT NULL DEFAULT '';
+ALTER TABLE deal_messages ADD COLUMN IF NOT EXISTS attachment_type TEXT NOT NULL DEFAULT '';
+ALTER TABLE deal_messages ADD COLUMN IF NOT EXISTS attachment_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE deal_messages ADD COLUMN IF NOT EXISTS reply_to_id BIGINT REFERENCES deal_messages (id) ON DELETE SET NULL;
+
 CREATE TABLE IF NOT EXISTS wallet_ledger (
 	id BIGSERIAL PRIMARY KEY,
 	user_id BIGINT NOT NULL REFERENCES app_users (id),
