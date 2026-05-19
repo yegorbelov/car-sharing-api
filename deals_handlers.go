@@ -60,12 +60,14 @@ type dealSummary struct {
 }
 
 type ledgerRow struct {
-	ID         int64   `json:"id"`
-	DeltaCents int64   `json:"deltaCents"`
-	EntryType  string  `json:"entryType"`
-	Note       string  `json:"note"`
-	CreatedAt  string  `json:"createdAt"`
-	DealID     *int64  `json:"dealId,omitempty"`
+	ID           int64   `json:"id"`
+	DeltaCents   int64   `json:"deltaCents"`
+	EntryType    string  `json:"entryType"`
+	Note         string  `json:"note"`
+	CreatedAt    string  `json:"createdAt"`
+	DealID       *int64  `json:"dealId,omitempty"`
+	VehicleTitle string  `json:"vehicleTitle,omitempty"`
+	DealStatus   string  `json:"dealStatus,omitempty"`
 }
 
 type walletResponse struct {
@@ -83,14 +85,6 @@ func (a *api) postDeal(c *echo.Context) error {
 	if req.VehicleID <= 0 {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid_vehicle"})
 	}
-	dayCount := req.DayCount
-	if dayCount == 0 {
-		dayCount = 3
-	}
-	if dayCount < 1 || dayCount > 14 {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid_day_count"})
-	}
-
 	ctx := c.Request().Context()
 	tx, err := a.db.Begin(ctx)
 	if err != nil {
@@ -101,14 +95,26 @@ func (a *api) postDeal(c *echo.Context) error {
 	var ownerID sql.NullInt64
 	var price int32
 	var title string
+	var minDays, maxDays int32
 	err = tx.QueryRow(ctx, `
-		SELECT owner_user_id, price_per_day_cents, title FROM vehicles WHERE id = $1 FOR UPDATE
-	`, req.VehicleID).Scan(&ownerID, &price, &title)
+		SELECT owner_user_id, price_per_day_cents, title, min_rental_days, max_rental_days
+		FROM vehicles WHERE id = $1 AND listing_status = $2 FOR UPDATE
+	`, req.VehicleID, vehicleStatusPublished).Scan(&ownerID, &price, &title, &minDays, &maxDays)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "vehicle_not_found"})
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	dayCount := req.DayCount
+	if dayCount == 0 {
+		dayCount = int(minDays)
+		if dayCount < 1 {
+			dayCount = 1
+		}
+	}
+	if dayCount < int(minDays) || dayCount > int(maxDays) {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid_day_count"})
 	}
 	if !ownerID.Valid {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "vehicle_has_no_owner"})
@@ -323,6 +329,9 @@ func (a *api) postDeclineDeal(c *echo.Context) error {
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
+	if st == dealDisputed {
+		return c.JSON(http.StatusConflict, map[string]string{"error": "dispute_open"})
+	}
 	if st != dealPendingOwner {
 		return c.JSON(http.StatusConflict, map[string]string{"error": "cannot_decline"})
 	}
@@ -367,6 +376,9 @@ func (a *api) postRenterCancel(c *echo.Context) error {
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
+	if st == dealDisputed {
+		return c.JSON(http.StatusConflict, map[string]string{"error": "dispute_open"})
+	}
 	if st != dealPendingOwner {
 		return c.JSON(http.StatusConflict, map[string]string{"error": "cannot_cancel"})
 	}
@@ -409,6 +421,9 @@ func (a *api) postCompleteDeal(c *echo.Context) error {
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
+	if st == dealDisputed {
+		return c.JSON(http.StatusConflict, map[string]string{"error": "dispute_open"})
+	}
 	if st != dealActive {
 		return c.JSON(http.StatusConflict, map[string]string{"error": "cannot_complete"})
 	}
@@ -444,8 +459,14 @@ func (a *api) getWallet(c *echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 	rows, err := a.db.Query(ctx, `
-		SELECT id, delta_cents, entry_type, note, created_at::text, deal_id
-		FROM wallet_ledger WHERE user_id = $1 ORDER BY id DESC LIMIT 40
+		SELECT wl.id, wl.delta_cents, wl.entry_type, wl.note, wl.created_at::text, wl.deal_id,
+		       v.title, rd.status
+		FROM wallet_ledger wl
+		LEFT JOIN rental_deals rd ON rd.id = wl.deal_id
+		LEFT JOIN vehicles v ON v.id = rd.vehicle_id
+		WHERE wl.user_id = $1
+		ORDER BY wl.id DESC
+		LIMIT 40
 	`, uid)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -456,12 +477,22 @@ func (a *api) getWallet(c *echo.Context) error {
 	for rows.Next() {
 		var r ledgerRow
 		var deal sql.NullInt64
-		if err := rows.Scan(&r.ID, &r.DeltaCents, &r.EntryType, &r.Note, &r.CreatedAt, &deal); err != nil {
+		var vehicleTitle, dealStatus sql.NullString
+		if err := rows.Scan(
+			&r.ID, &r.DeltaCents, &r.EntryType, &r.Note, &r.CreatedAt, &deal,
+			&vehicleTitle, &dealStatus,
+		); err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		}
 		if deal.Valid {
 			d := deal.Int64
 			r.DealID = &d
+		}
+		if vehicleTitle.Valid && vehicleTitle.String != "" {
+			r.VehicleTitle = vehicleTitle.String
+		}
+		if dealStatus.Valid && dealStatus.String != "" {
+			r.DealStatus = dealStatus.String
 		}
 		recent = append(recent, r)
 	}

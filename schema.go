@@ -19,6 +19,9 @@ CREATE INDEX IF NOT EXISTS app_users_email_lower_idx ON app_users (lower(email))
 
 ALTER TABLE app_users ADD COLUMN IF NOT EXISTS balance_cents BIGINT NOT NULL DEFAULT 500000;
 ALTER TABLE app_users ADD COLUMN IF NOT EXISTS avatar_url TEXT NOT NULL DEFAULT '';
+ALTER TABLE app_users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE app_users ADD COLUMN IF NOT EXISTS is_moderator BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE app_users ADD COLUMN IF NOT EXISTS is_arbitrator BOOLEAN NOT NULL DEFAULT false;
 
 ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS owner_user_id BIGINT REFERENCES app_users (id);
 ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS photo_url TEXT NOT NULL DEFAULT '';
@@ -35,6 +38,56 @@ ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS tech_notes TEXT NOT NULL DEFAULT '
 ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS vin TEXT NOT NULL DEFAULT '';
 ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS review_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION;
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION;
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS listing_status TEXT NOT NULL DEFAULT 'published';
+UPDATE vehicles SET listing_status = 'published' WHERE listing_status IS NULL OR trim(listing_status) = '';
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS min_rental_days INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS max_rental_days INTEGER NOT NULL DEFAULT 14;
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS seat_count INTEGER NOT NULL DEFAULT 5;
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS pets_allowed BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS fuel_return_policy TEXT NOT NULL DEFAULT 'same_level';
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS moderation_note TEXT NOT NULL DEFAULT '';
+
+CREATE TABLE IF NOT EXISTS staff_audit_log (
+	id BIGSERIAL PRIMARY KEY,
+	actor_user_id BIGINT NOT NULL REFERENCES app_users (id),
+	action TEXT NOT NULL,
+	entity_type TEXT NOT NULL,
+	entity_id BIGINT NOT NULL,
+	details JSONB NOT NULL DEFAULT '{}',
+	created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS staff_audit_log_created_at_idx ON staff_audit_log (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS rental_disputes (
+	id BIGSERIAL PRIMARY KEY,
+	deal_id BIGINT NOT NULL UNIQUE REFERENCES rental_deals (id) ON DELETE CASCADE,
+	opened_by_user_id BIGINT NOT NULL REFERENCES app_users (id),
+	reason_code TEXT NOT NULL,
+	description TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'open',
+	resolution_code TEXT NOT NULL DEFAULT '',
+	resolution_note TEXT NOT NULL DEFAULT '',
+	renter_refund_cents BIGINT NOT NULL DEFAULT 0,
+	owner_payout_cents BIGINT NOT NULL DEFAULT 0,
+	arbitrator_user_id BIGINT REFERENCES app_users (id),
+	resolved_at TIMESTAMPTZ,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS rental_disputes_status_idx ON rental_disputes (status, created_at);
+
+CREATE TABLE IF NOT EXISTS dispute_evidence (
+	id BIGSERIAL PRIMARY KEY,
+	dispute_id BIGINT NOT NULL REFERENCES rental_disputes (id) ON DELETE CASCADE,
+	uploaded_by_user_id BIGINT NOT NULL REFERENCES app_users (id),
+	attachment_url TEXT NOT NULL DEFAULT '',
+	attachment_type TEXT NOT NULL DEFAULT 'image',
+	caption TEXT NOT NULL DEFAULT '',
+	created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS dispute_evidence_dispute_idx ON dispute_evidence (dispute_id);
 
 CREATE TABLE IF NOT EXISTS vehicle_reviews (
 	id BIGSERIAL PRIMARY KEY,

@@ -20,6 +20,9 @@ const (
 type demoUserSpec struct {
 	email, fullName string
 	balanceCents    int64
+	isAdmin         bool
+	isModerator     bool
+	isArbitrator    bool
 }
 
 type demoVehicleSpec struct {
@@ -47,6 +50,51 @@ var demoVehicleGallery = []string{
 	"https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&w=800&q=80",
 }
 
+// Staff accounts for RBAC demos; inserted on startup if missing (existing DBs skip full reseed).
+var demoStaffUsers = []demoUserSpec{
+	{email: "admin@carsharing.demo", fullName: "Platform Admin", balanceCents: 500_000, isAdmin: true},
+	{email: "moderator@carsharing.demo", fullName: "Listing Moderator", balanceCents: 500_000, isModerator: true},
+	{email: "arbitrator@carsharing.demo", fullName: "Dispute Arbitrator", balanceCents: 500_000, isArbitrator: true},
+}
+
+func ensureStaffDemoUsers(ctx context.Context, pool *pgxpool.Pool) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(demoSeedPassword), bcryptCost)
+	if err != nil {
+		return fmt.Errorf("demo staff password hash: %w", err)
+	}
+	pw := string(hash)
+
+	for _, u := range demoStaffUsers {
+		var id int64
+		err := pool.QueryRow(ctx, `
+			SELECT id FROM app_users WHERE lower(email) = lower($1)
+		`, u.email).Scan(&id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			_, err = pool.Exec(ctx, `
+				INSERT INTO app_users (email, password_hash, full_name, balance_cents, is_admin, is_moderator, is_arbitrator)
+				VALUES ($1, $2, $3, $4, $5, $6, $7)
+			`, u.email, pw, u.fullName, u.balanceCents, u.isAdmin, u.isModerator, u.isArbitrator)
+			if err != nil {
+				return fmt.Errorf("insert staff user %s: %w", u.email, err)
+			}
+			log.Printf("demo staff user created: %s / %s", u.email, demoSeedPassword)
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		_, err = pool.Exec(ctx, `
+			UPDATE app_users
+			SET is_admin = $1, is_moderator = $2, is_arbitrator = $3
+			WHERE id = $4
+		`, u.isAdmin, u.isModerator, u.isArbitrator, id)
+		if err != nil {
+			return fmt.Errorf("update staff roles %s: %w", u.email, err)
+		}
+	}
+	return nil
+}
+
 func hasLegacyInitVehicles(ctx context.Context, pool *pgxpool.Pool) (bool, error) {
 	var n int
 	err := pool.QueryRow(ctx, `
@@ -57,6 +105,10 @@ func hasLegacyInitVehicles(ctx context.Context, pool *pgxpool.Pool) (bool, error
 }
 
 func ensureDevSeed(ctx context.Context, pool *pgxpool.Pool) error {
+	if err := ensureStaffDemoUsers(ctx, pool); err != nil {
+		return err
+	}
+
 	var markerExists bool
 	if err := pool.QueryRow(ctx, `
 		SELECT EXISTS(SELECT 1 FROM app_users WHERE lower(email) = lower($1))
@@ -216,6 +268,7 @@ func insertFullDemoData(ctx context.Context, pool *pgxpool.Pool) error {
 		{email: "ivan.renter@carsharing.demo", fullName: "Ivan Smirnov", balanceCents: 500_000},
 		{email: "maria.renter@carsharing.demo", fullName: "Maria Kozlova", balanceCents: 500_000},
 	}
+	users = append(users, demoStaffUsers...)
 
 	vehicles := []demoVehicleSpec{
 		{
@@ -303,10 +356,10 @@ func insertFullDemoData(ctx context.Context, pool *pgxpool.Pool) error {
 	for _, u := range users {
 		var id int64
 		err := tx.QueryRow(ctx, `
-			INSERT INTO app_users (email, password_hash, full_name, balance_cents)
-			VALUES ($1, $2, $3, $4)
+			INSERT INTO app_users (email, password_hash, full_name, balance_cents, is_admin, is_moderator, is_arbitrator)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
 			RETURNING id
-		`, u.email, pw, u.fullName, u.balanceCents).Scan(&id)
+		`, u.email, pw, u.fullName, u.balanceCents, u.isAdmin, u.isModerator, u.isArbitrator).Scan(&id)
 		if err != nil {
 			return fmt.Errorf("insert user %s: %w", u.email, err)
 		}

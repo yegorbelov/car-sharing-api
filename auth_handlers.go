@@ -33,10 +33,14 @@ type updateProfileRequest struct {
 }
 
 type userPublic struct {
-	ID        int64  `json:"id"`
-	Email     string `json:"email"`
-	FullName  string `json:"fullName"`
-	AvatarURL string `json:"avatarUrl"`
+	ID           int64    `json:"id"`
+	Email        string   `json:"email"`
+	FullName     string   `json:"fullName"`
+	AvatarURL    string   `json:"avatarUrl"`
+	IsAdmin      bool     `json:"isAdmin"`
+	IsModerator  bool     `json:"isModerator"`
+	IsArbitrator bool     `json:"isArbitrator"`
+	Roles        []string `json:"roles"`
 }
 
 type authResponse struct {
@@ -163,14 +167,8 @@ func (a *api) postRegister(c *echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "token_failed"})
 	}
-	return c.JSON(http.StatusCreated, authResponse{
-		AccessToken: token,
-		User: userPublic{
-			ID:       id,
-			Email:    email,
-			FullName: fullName,
-		},
-	})
+	u := userPublic{ID: id, Email: email, FullName: fullName, Roles: []string{"user"}}
+	return c.JSON(http.StatusCreated, authResponse{AccessToken: token, User: u})
 }
 
 func (a *api) postLogin(c *echo.Context) error {
@@ -187,9 +185,11 @@ func (a *api) postLogin(c *echo.Context) error {
 	var hash string
 	var fullName string
 	var avatarURL string
+	var isAdmin, isModerator, isArbitrator bool
 	err := a.db.QueryRow(ctx, `
-		SELECT id, password_hash, full_name, avatar_url FROM app_users WHERE lower(email) = lower($1)
-	`, email).Scan(&id, &hash, &fullName, &avatarURL)
+		SELECT id, password_hash, full_name, avatar_url, is_admin, is_moderator, is_arbitrator
+		FROM app_users WHERE lower(email) = lower($1)
+	`, email).Scan(&id, &hash, &fullName, &avatarURL, &isAdmin, &isModerator, &isArbitrator)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid_credentials"})
@@ -203,15 +203,12 @@ func (a *api) postLogin(c *echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "token_failed"})
 	}
-	return c.JSON(http.StatusOK, authResponse{
-		AccessToken: token,
-		User: userPublic{
-			ID:        id,
-			Email:     email,
-			FullName:  fullName,
-			AvatarURL: avatarURL,
-		},
-	})
+	u := userPublic{
+		ID: id, Email: email, FullName: fullName, AvatarURL: avatarURL,
+		IsAdmin: isAdmin, IsModerator: isModerator, IsArbitrator: isArbitrator,
+	}
+	u.Roles = buildRoleList(u)
+	return c.JSON(http.StatusOK, authResponse{AccessToken: token, User: u})
 }
 
 func (a *api) getMe(c *echo.Context) error {
@@ -222,14 +219,16 @@ func (a *api) getMe(c *echo.Context) error {
 	ctx := c.Request().Context()
 	var u userPublic
 	err = a.db.QueryRow(ctx, `
-		SELECT id, email, full_name, avatar_url FROM app_users WHERE id = $1
-	`, uid).Scan(&u.ID, &u.Email, &u.FullName, &u.AvatarURL)
+		SELECT id, email, full_name, avatar_url, is_admin, is_moderator, is_arbitrator
+		FROM app_users WHERE id = $1
+	`, uid).Scan(&u.ID, &u.Email, &u.FullName, &u.AvatarURL, &u.IsAdmin, &u.IsModerator, &u.IsArbitrator)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server_error"})
 	}
+	u.Roles = buildRoleList(u)
 	return c.JSON(http.StatusOK, map[string]userPublic{"user": u})
 }
 
@@ -247,14 +246,15 @@ func (a *api) patchMe(c *echo.Context) error {
 	var u userPublic
 	err := a.db.QueryRow(ctx, `
 		UPDATE app_users SET full_name = $1 WHERE id = $2
-		RETURNING id, email, full_name, avatar_url
-	`, fullName, uid).Scan(&u.ID, &u.Email, &u.FullName, &u.AvatarURL)
+		RETURNING id, email, full_name, avatar_url, is_admin, is_moderator, is_arbitrator
+	`, fullName, uid).Scan(&u.ID, &u.Email, &u.FullName, &u.AvatarURL, &u.IsAdmin, &u.IsModerator, &u.IsArbitrator)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "session_invalid"})
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server_error"})
 	}
+	u.Roles = buildRoleList(u)
 	return c.JSON(http.StatusOK, map[string]userPublic{"user": u})
 }
 
