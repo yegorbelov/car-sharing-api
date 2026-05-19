@@ -219,6 +219,7 @@ func (a *api) postDealMessage(c *echo.Context) error {
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
+	a.chatHub.broadcastMessage(dealID, inserted)
 	return c.JSON(http.StatusCreated, inserted)
 }
 
@@ -262,6 +263,7 @@ func (a *api) postDealMessageMultipart(c *echo.Context) error {
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
+	a.chatHub.broadcastMessage(dealID, inserted)
 	return c.JSON(http.StatusCreated, inserted)
 }
 

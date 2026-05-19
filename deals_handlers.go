@@ -483,6 +483,7 @@ func registerDealRoutes(g *echo.Group, h *api) {
 	g.GET("/deals/mine", h.getMyDeals)
 	g.GET("/deals/:id", h.getDeal)
 	g.GET("/deals/:id/messages", h.getDealMessages)
+	g.GET("/deals/:id/messages/ws", h.getDealMessagesWS)
 	g.POST("/deals/:id/messages", h.postDealMessage)
 	g.POST("/deals/:id/accept", h.postAcceptDeal)
 	g.POST("/deals/:id/decline", h.postDeclineDeal)

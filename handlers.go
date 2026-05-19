@@ -16,7 +16,8 @@ import (
 )
 
 type api struct {
-	db *pgxpool.Pool
+	db      *pgxpool.Pool
+	chatHub *dealChatHub
 }
 
 type vehicleRow struct {
@@ -310,7 +311,7 @@ func (a *api) postVehicle(c *echo.Context) error {
 }
 
 func registerAPIRoutes(e *echo.Echo, pool *pgxpool.Pool) {
-	h := &api{db: pool}
+	h := &api{db: pool, chatHub: newDealChatHub()}
 	g := e.Group("/api/v1")
 	g.GET("/vehicles", h.getVehicles)
 	g.GET("/vehicles/:id", h.getVehicle)
