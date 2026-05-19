@@ -319,6 +319,7 @@ func registerAPIRoutes(e *echo.Echo, pool *pgxpool.Pool) {
 	g.GET("/auth/me", h.getMe)
 
 	secured := g.Group("", h.requireAuth)
+	secured.PATCH("/auth/me", h.patchMe)
 	secured.POST("/vehicles", h.postVehicle)
 	secured.POST("/auth/avatar", h.postAvatar)
 	secured.POST("/vehicles/:id/photo", h.postVehiclePhoto)

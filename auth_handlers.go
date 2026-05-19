@@ -28,6 +28,10 @@ type loginRequest struct {
 	Password string `json:"password"`
 }
 
+type updateProfileRequest struct {
+	FullName string `json:"fullName"`
+}
+
 type userPublic struct {
 	ID        int64  `json:"id"`
 	Email     string `json:"email"`
@@ -223,6 +227,31 @@ func (a *api) getMe(c *echo.Context) error {
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server_error"})
+	}
+	return c.JSON(http.StatusOK, map[string]userPublic{"user": u})
+}
+
+func (a *api) patchMe(c *echo.Context) error {
+	uid := authUserID(c)
+	var req updateProfileRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid_json"})
+	}
+	fullName := strings.TrimSpace(req.FullName)
+	if len(fullName) < 2 || len(fullName) > 100 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid_full_name"})
+	}
+	ctx := c.Request().Context()
+	var u userPublic
+	err := a.db.QueryRow(ctx, `
+		UPDATE app_users SET full_name = $1 WHERE id = $2
+		RETURNING id, email, full_name, avatar_url
+	`, fullName, uid).Scan(&u.ID, &u.Email, &u.FullName, &u.AvatarURL)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "session_invalid"})
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server_error"})
 	}
