@@ -28,6 +28,8 @@ type vehicleRow struct {
 	PricePerDayCents int32    `json:"pricePerDayCents"`
 	PricePerDay      float64  `json:"pricePerDay"`
 	Rating           float64  `json:"rating"`
+	ReviewCount      int32    `json:"reviewCount"`
+	CreatedAt        string   `json:"createdAt"`
 	OwnerUserID      *int64   `json:"ownerUserId,omitempty"`
 	PhotoURL         string   `json:"photoUrl,omitempty"`
 	PhotoURLs        []string `json:"photoUrls"`
@@ -80,7 +82,8 @@ func fillVehicleRowPhotos(v *vehicleRow, legacyPhoto, photoURLsJSON string) {
 func (a *api) getVehicles(c *echo.Context) error {
 	ctx := c.Request().Context()
 	rows, err := a.db.Query(ctx, `
-		SELECT id, title, city, class, price_per_day_cents, rating, owner_user_id,
+		SELECT id, title, city, class, price_per_day_cents, rating, review_count,
+			created_at::text, owner_user_id,
 			photo_url, photo_urls, mileage_km, model_year, transmission, fuel_type, drivetrain,
 			engine_cc, exterior_color, condition_summary, tech_notes, vin
 		FROM vehicles ORDER BY id
@@ -96,7 +99,8 @@ func (a *api) getVehicles(c *echo.Context) error {
 		var owner sql.NullInt64
 		var legacyPhoto, photoURLsJSON string
 		if err := rows.Scan(
-			&v.ID, &v.Title, &v.City, &v.Class, &v.PricePerDayCents, &v.Rating, &owner,
+			&v.ID, &v.Title, &v.City, &v.Class, &v.PricePerDayCents, &v.Rating, &v.ReviewCount,
+			&v.CreatedAt, &owner,
 			&legacyPhoto, &photoURLsJSON, &v.MileageKm, &v.ModelYear, &v.Transmission, &v.FuelType, &v.Drivetrain,
 			&v.EngineCC, &v.ExteriorColor, &v.ConditionSummary, &v.TechNotes, &v.VIN,
 		); err != nil {
@@ -129,12 +133,14 @@ func (a *api) getVehicle(c *echo.Context) error {
 	var owner sql.NullInt64
 	var legacyPhoto, photoURLsJSON string
 	err = a.db.QueryRow(ctx, `
-		SELECT id, title, city, class, price_per_day_cents, rating, owner_user_id,
+		SELECT id, title, city, class, price_per_day_cents, rating, review_count,
+			created_at::text, owner_user_id,
 			photo_url, photo_urls, mileage_km, model_year, transmission, fuel_type, drivetrain,
 			engine_cc, exterior_color, condition_summary, tech_notes, vin
 		FROM vehicles WHERE id = $1
 	`, id).Scan(
-		&v.ID, &v.Title, &v.City, &v.Class, &v.PricePerDayCents, &v.Rating, &owner,
+		&v.ID, &v.Title, &v.City, &v.Class, &v.PricePerDayCents, &v.Rating, &v.ReviewCount,
+		&v.CreatedAt, &owner,
 		&legacyPhoto, &photoURLsJSON, &v.MileageKm, &v.ModelYear, &v.Transmission, &v.FuelType, &v.Drivetrain,
 		&v.EngineCC, &v.ExteriorColor, &v.ConditionSummary, &v.TechNotes, &v.VIN,
 	)
@@ -283,14 +289,16 @@ func (a *api) postVehicle(c *echo.Context) error {
 			engine_cc, exterior_color, condition_summary, tech_notes, vin
 		)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-		RETURNING id, title, city, class, price_per_day_cents, rating, owner_user_id,
+		RETURNING id, title, city, class, price_per_day_cents, rating, review_count,
+			created_at::text, owner_user_id,
 			photo_url, photo_urls, mileage_km, model_year, transmission, fuel_type, drivetrain,
 			engine_cc, exterior_color, condition_summary, tech_notes, vin
 	`, title, city, class, cents, rating, uid,
 		mileageKm, modelYear, trans, fuel, drive,
 		engineCC, color, cond, notes, vin,
 	).Scan(
-		&v.ID, &v.Title, &v.City, &v.Class, &v.PricePerDayCents, &v.Rating, &owner,
+		&v.ID, &v.Title, &v.City, &v.Class, &v.PricePerDayCents, &v.Rating, &v.ReviewCount,
+		&v.CreatedAt, &owner,
 		&legacyPhoto, &photoURLsJSON, &v.MileageKm, &v.ModelYear, &v.Transmission, &v.FuelType, &v.Drivetrain,
 		&v.EngineCC, &v.ExteriorColor, &v.ConditionSummary, &v.TechNotes, &v.VIN,
 	)
@@ -315,9 +323,12 @@ func registerAPIRoutes(e *echo.Echo, pool *pgxpool.Pool) {
 	g := e.Group("/api/v1")
 	g.GET("/vehicles", h.getVehicles)
 	g.GET("/vehicles/:id", h.getVehicle)
+	g.GET("/vehicles/:id/reviews", h.getVehicleReviews)
 	g.POST("/auth/register", h.postRegister)
 	g.POST("/auth/login", h.postLogin)
 	g.GET("/auth/me", h.getMe)
+	// WebSocket auth uses ?token= or Bearer in the handler (not requireAuth).
+	g.GET("/deals/:id/messages/ws", h.getDealMessagesWS)
 
 	secured := g.Group("", h.requireAuth)
 	secured.PATCH("/auth/me", h.patchMe)

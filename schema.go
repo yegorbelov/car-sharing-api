@@ -33,6 +33,33 @@ ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS exterior_color TEXT NOT NULL DEFAU
 ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS condition_summary TEXT NOT NULL DEFAULT '';
 ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS tech_notes TEXT NOT NULL DEFAULT '';
 ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS vin TEXT NOT NULL DEFAULT '';
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS review_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+CREATE TABLE IF NOT EXISTS vehicle_reviews (
+	id BIGSERIAL PRIMARY KEY,
+	vehicle_id INTEGER NOT NULL REFERENCES vehicles (id) ON DELETE CASCADE,
+	author_name TEXT NOT NULL,
+	rating REAL NOT NULL CHECK (rating >= 1 AND rating <= 5),
+	body TEXT NOT NULL DEFAULT '',
+	created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS vehicle_reviews_vehicle_idx ON vehicle_reviews (vehicle_id, created_at DESC);
+
+UPDATE vehicles v
+SET review_count = COALESCE(r.cnt, 0),
+    rating = COALESCE(r.avg, v.rating)
+FROM (
+	SELECT vehicle_id, COUNT(*)::int AS cnt, AVG(vr.rating)::real AS avg
+	FROM vehicle_reviews vr
+	GROUP BY vehicle_id
+) r
+WHERE v.id = r.vehicle_id;
+
+UPDATE vehicles v
+SET review_count = 0
+WHERE NOT EXISTS (SELECT 1 FROM vehicle_reviews r WHERE r.vehicle_id = v.id)
+  AND v.review_count <> 0;
 
 UPDATE vehicles
 SET photo_urls = to_json(ARRAY[photo_url::text])::text
