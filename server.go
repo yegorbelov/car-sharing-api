@@ -48,6 +48,9 @@ func main() {
 	if err := ensureSchema(ctx, pool); err != nil {
 		log.Fatalf("schema: %v", err)
 	}
+	if err := ensureDevSeed(ctx, pool); err != nil {
+		log.Fatalf("seed: %v", err)
+	}
 	ensureUploadDir()
 
 	e := echo.New()

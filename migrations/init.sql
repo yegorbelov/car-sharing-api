@@ -17,10 +17,4 @@ CREATE TABLE IF NOT EXISTS bookings (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-INSERT INTO vehicles (title, city, class, price_per_day_cents, rating)
-VALUES
-    ('Toyota Camry', 'Moscow', 'sedan', 8000, 4.8),
-    ('Kia Rio', 'Saint Petersburg', 'economy', 6000, 4.5),
-    ('BMW X3', 'Kazan', 'suv', 14000, 4.9),
-    ('Lada Vesta', 'Nizhny Novgorod', 'comfort', 5000, 4.3),
-    ('Mercedes-Benz E-Class', 'Moscow', 'business', 18300, 4.7);
+-- Demo users, vehicles (with owners), deals, and wallet data are inserted on API startup (seed.go).
